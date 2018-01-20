@@ -1,0 +1,214 @@
+---
+title: "Call-in Analysis"
+author: "ftinawi"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Call-in/Cancellation Experiment Analysis
+
+**Goal**: Evaluate the performance of the call-in initiative.
+
+### Importing the csv files
+
+```{r}
+testSamples <- read.csv("//data-ge02/Users/ftinawi/Documents/Bogoss_directory/testSamples.csv")
+transData <- read.csv("//data-ge02/Users/ftinawi/Documents/Bogoss_directory/transData.csv")
+```
+
+### Preparing the data
+
+```{r, message=FALSE, warning=FALSE}
+#install.packages("plyr")
+library(plyr)
+#install.packages("dplyr")
+library(dplyr)
+#install.packages("sqldf")
+library(sqldf)
+#install.packages("BSDA")
+library(BSDA)         # for the z-test function
+```
+
+We merge the two data sets together:
+```{r}
+transFull <- merge(x = testSamples, y = transData, by.x = "sample_id", by.y = "sample_id", all.x = TRUE);
+transFull[10:20,]
+```
+
+Let's see the distribution per transaction type.
+```{r}
+count(transFull,transFull$transaction_type)
+```
+
+
+### Approximation of the probability distribution 
+
+Grouping in regard to the test type:
+```{r}
+testGroup <- group_by(testSamples, test_group)
+summarise(testGroup,ct=length(test_group))
+```
+
+Defining some constants:
+```{r, results='hold'}
+# Size of the population
+n = dim(testSamples)[1]
+n
+# Size of the test group
+m = summarise(testGroup,ct=length(test_group))[[2,2]]
+m
+```
+
+Since n is large enough, we can estimate p and q as follows:
+```{r, results='hold'}
+# Estimated probability of being selected in the test group
+p <- m/n
+p
+q <- (1-p)
+q
+```
+
+
+Validate conditions to approximate binomial with normal distribution:
+
+```{r, results='hold'}
+n*p > 10
+n*q > 10
+```
+
+Using the Central limit theorem and $Z = \frac{X -\mu}{\sigma}$, we have the following normal distribution $N\sim (14835,105.6)$.
+
+```{r, results='hold'}
+mu <- n*p
+mu
+sig <- sqrt(n*p*q)
+sig
+```
+
+We plot the graph of the curve.
+```{r}
+x <- seq(mu - 500,mu + 500, by = 5)
+y <- dnorm(x, mean = mu, sd = sig)
+plot (x, y, type = "l", xlab = "Z values", ylab = "Density", main = "Graph of normal distribution")
+```
+
+### Looking into the rebills
+
+We now look deeper into the call-in users and their purchasing habits.
+
+#### Proportion of rebills
+
+We group the rebills and revenues by test type and transaction type.
+```{r}
+trxGrp <- group_by(transFull, sample_id, test_group, transaction_type)
+transFullGrp <- summarise(trxGrp, trxTT = length(sample_id), revTT = sum(transaction_amount))
+head(transFullGrp,15)
+```
+
+Let's compute the ratio of call-in users that lead to at least one rebill.
+```{r,results='hold'}
+CallWithRebill <- dim(transFullGrp[which(transFullGrp$test_group == 1 & transFullGrp$transaction_type == 'REBILL'),])[1]
+CallWithRebill
+CallWithRebill / m
+```
+
+We compare with the web-form users.
+```{r,results='hold'}
+WebWithRebill <- dim(transFullGrp[which(transFullGrp$test_group == 0 & transFullGrp$transaction_type == 'REBILL'),])[1]
+WebWithRebill/(n-m)
+#We divide the two proportions
+(CallWithRebill/m) / (WebWithRebill/(n-m))
+```
+
+**Observation**: Call-in users are 5 times more likely to generate a rebill versus the web form users.  
+Is this observation statistically significant?
+
+Let the null hypothesis be:
+
+$H_{0}$ = proportion of rebills from call-in users is similar than the one from users using the web form
+
+and the alternate hypothesis:
+
+$H_{a}$ = proportion of rebills from call-in users is greater than the one from users using the web form
+
+we apply the Z-test:
+```{r}
+res <- prop.test(c(CallWithRebill,WebWithRebill), c(m,n-m), alternative = "greater")
+res
+# we verify that the p-value is less than the significance level of 5%
+res$p.value < 0.05
+```
+
+With a p-value smaller than 2.2e-16 and well below the 5% significance level, we reject the null hypothesis.
+
+**Conclusion**: we can state that call-in users will generate more rebills than web-form users with 95% confidence.  
+
+#### Average revenue per user
+
+We define some useful values:
+```{r, results='hold'}
+# Denormalized dataframe with rebills and revenues per user
+trxDenorm <- sqldf("select sample_id, test_group, count(*) ct_tt
+        , ifnull(sum(t.transaction_type == 'REBILL'),0) as ct_rebill
+        , ifnull(sum(t.transaction_type == 'CHARGEBACK'),0) as ct_chgbk
+        , ifnull(sum(t.transaction_type == 'REFUND'),0) as ct_refund
+        , ifnull(sum(t.transaction_amount),0) revenues
+        , round(sum(t.transaction_type == 'CHARGEBACK') / sum(t.transaction_type == 'REBILL'), 4) chgbk_rate
+        from transFull t
+        group by t.sample_id, test_group")
+```
+
+Let's investigate now the revenue average and standard deviation among the two groups.
+```{r,results='hold'}
+CallAvgRev <- mean(trxDenorm$revenues[trxDenorm$test_group == 1])
+CallAvgRev 
+WebAvgRev <- mean(trxDenorm$revenues[trxDenorm$test_group == 0])
+WebAvgRev
+CallSdRev <- sd(trxDenorm$revenues[trxDenorm$test_group == 1])
+CallSdRev
+WebSdRev <- sd(trxDenorm$revenues[trxDenorm$test_group == 0])
+WebSdRev
+```
+
+**Observation**: Call-in users generate revenues three times greater than the web form users.  
+Is this observation statistically significant?
+
+Let the null hypothesis be:
+
+$H_{0}$ = average revenue from call-in users is similar to the one from users using the web form
+
+and the alternate hypothesis:
+
+$H_{a}$ = average revenue from call-in users is greater then the one from users using the web form
+
+Using the samples standard deviations to estimate the population standard deviations, we compute the z value: 
+$$z = \frac{\overline{x}_1 - \overline{x}_2}{\sqrt{s_1^2/n_1 + s_2^2/n_2}}$$
+```{r}
+z = (CallAvgRev - WebAvgRev)/sqrt(CallSdRev^2/m + WebSdRev^2/(n-m))
+z
+# Verify that z is in the confidence interval
+z > 1.96
+```
+
+**Conclusion**:  we can state that call-in users will generate more revenues than web-form users with 95% confidence.
+
+#### Chargeback rate
+
+Let's compute the chargeback rates.
+```{r,results='hold'}
+CallCBrate <- sum(trxDenorm$ct_chgbk[trxDenorm$test_group == 1])/sum(trxDenorm$ct_rebill[trxDenorm$test_group == 1])
+CallCBrate 
+WebCBrate <- sum(trxDenorm$ct_chgbk[trxDenorm$test_group == 0])/sum(trxDenorm$ct_rebill[trxDenorm$test_group == 0])
+WebCBrate
+```
+
+**Observation**: Chargeback rate for call-in users seems lower than for the web form users.  
+Is this observation statistically significant?
+
+
+We apply the z-test:
+```{r}
+res2 <- z.test(trxDenorm$revenues[trxDenorm$test_group == 1],trxDenorm$revenues[trxDenorm$test_group == 0],sigma.x = CallSdRev, sigma.y = WebSdRev,alternative = "greater",conf.level = 0.95)
+res2
+```
