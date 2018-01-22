@@ -1,10 +1,3 @@
----
-title: "Call-in Analysis"
-author: "ftinawi"
-output:
-  html_document: default
-  pdf_document: default
----
 
 # Call-in/Cancellation Experiment Analysis
 
@@ -28,8 +21,6 @@ library(dplyr)
 library(sqldf)
 #install.packages("BSDA")
 library(BSDA)         # for the z-test function
-#install.packages("BEST")
-
 ```
 
 We merge the two data sets together:
@@ -134,7 +125,7 @@ and the alternate hypothesis:
 
 $H_{a}$ = proportion of rebills from call-in users is greater than the one from users using the web form
 
-we apply the Z-test:
+We apply the 2 samples test for proportions:
 ```{r}
 res <- prop.test(c(CallWithRebill,WebWithRebill), c(m,n-m), alternative = "greater")
 res
