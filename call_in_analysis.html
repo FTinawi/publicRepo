@@ -137,7 +137,10 @@ library(plyr)
 #install.packages(&quot;dplyr&quot;)
 library(dplyr)
 #install.packages(&quot;sqldf&quot;)
-library(sqldf)</code></pre>
+library(sqldf)
+#install.packages(&quot;BSDA&quot;)
+library(BSDA)         # for the z-test function
+#install.packages(&quot;BEST&quot;)</code></pre>
 <p>We merge the two data sets together:</p>
 <pre class="r"><code>transFull &lt;- merge(x = testSamples, y = transData, by.x = &quot;sample_id&quot;, by.y = &quot;sample_id&quot;, all.x = TRUE);
 transFull[10:20,]</code></pre>
@@ -252,7 +255,7 @@ WebWithRebill/(n-m)
 <p><strong>Observation</strong>: Call-in users are 5 times more likely to generate a rebill versus the web form users.<br />
 Is this observation statistically significant?</p>
 <p>Let the null hypothesis be:</p>
-<p><span class="math inline">\(H_{0}\)</span> = proportion of rebills from call-in users is similar or less than the one from users using the web form</p>
+<p><span class="math inline">\(H_{0}\)</span> = proportion of rebills from call-in users is similar than the one from users using the web form</p>
 <p>and the alternate hypothesis:</p>
 <p><span class="math inline">\(H_{a}\)</span> = proportion of rebills from call-in users is greater than the one from users using the web form</p>
 <p>we apply the Z-test:</p>
@@ -273,7 +276,7 @@ res</code></pre>
 <pre class="r"><code># we verify that the p-value is less than the significance level of 5%
 res$p.value &lt; 0.05</code></pre>
 <pre><code>## [1] TRUE</code></pre>
-<p>With a p-value of 2.2e-16 well below the 5% significance level, we reject the null hypothesis.</p>
+<p>With a p-value smaller than 2.2e-16 and well below the 5% significance level, we reject the null hypothesis.</p>
 <p><strong>Conclusion</strong>: we can state that call-in users will generate more rebills than web-form users with 95% confidence.</p>
 </div>
 <div id="average-revenue-per-user" class="section level4">
@@ -287,21 +290,96 @@ trxDenorm &lt;- sqldf(&quot;select sample_id, test_group, count(*) ct_tt
         , ifnull(sum(t.transaction_amount),0) revenues
         , round(sum(t.transaction_type == 'CHARGEBACK') / sum(t.transaction_type == 'REBILL'), 4) chgbk_rate
         from transFull t
-        group by t.sample_id, test_group&quot;)</code></pre>
-<p>Let’s investigate now the revenue average among the two groups.</p>
+        group by t.sample_id, test_group&quot;)
+head(trxDenorm)</code></pre>
+<pre><code>##   sample_id test_group ct_tt ct_rebill ct_chgbk ct_refund revenues
+## 1         1          0     1         0        0         0        0
+## 2         2          1     1         0        0         0        0
+## 3         3          0     1         0        0         0        0
+## 4         4          1     1         0        0         0        0
+## 5         5          1     1         0        0         0        0
+## 6         6          0     1         0        0         0        0
+##   chgbk_rate
+## 1         NA
+## 2         NA
+## 3         NA
+## 4         NA
+## 5         NA
+## 6         NA</code></pre>
+<p>Let’s investigate now the revenue average and standard deviation among the two groups.</p>
 <pre class="r"><code>CallAvgRev &lt;- mean(trxDenorm$revenues[trxDenorm$test_group == 1])
 CallAvgRev 
 WebAvgRev &lt;- mean(trxDenorm$revenues[trxDenorm$test_group == 0])
-WebAvgRev</code></pre>
+WebAvgRev
+CallSdRev &lt;- sd(trxDenorm$revenues[trxDenorm$test_group == 1])
+CallSdRev
+WebSdRev &lt;- sd(trxDenorm$revenues[trxDenorm$test_group == 0])
+WebSdRev</code></pre>
 <pre><code>## [1] 6.432996
-## [1] 2.00149</code></pre>
+## [1] 2.00149
+## [1] 25.70531
+## [1] 20.4474</code></pre>
 <p><strong>Observation</strong>: Call-in users generate revenues three times greater than the web form users.<br />
 Is this observation statistically significant?</p>
 <p>Let the null hypothesis be:</p>
-<p><span class="math inline">\(H_{0}\)</span> = average revenue from call-in users is similar or less the one from users using the web form</p>
+<p><span class="math inline">\(H_{0}\)</span> = average revenue from call-in users is similar to the one from users using the web form</p>
 <p>and the alternate hypothesis:</p>
 <p><span class="math inline">\(H_{a}\)</span> = average revenue from call-in users is greater then the one from users using the web form</p>
-<p>we apply the Z-test:</p>
+<p>Using the samples standard deviations to estimate the population standard deviations, we compute the z value: <span class="math display">\[z = \frac{\overline{x}_1 - \overline{x}_2}{\sqrt{s_1^2/n_1 + s_2^2/n_2}}\]</span></p>
+<pre class="r"><code>z = (CallAvgRev - WebAvgRev)/sqrt(CallSdRev^2/m + WebSdRev^2/(n-m))
+z</code></pre>
+<pre><code>## [1] 19.09574</code></pre>
+<pre class="r"><code># Verify that z is in the confidence interval
+z &gt; 1.96</code></pre>
+<pre><code>## [1] TRUE</code></pre>
+<p><strong>Conclusion</strong>: we can state that call-in users will generate more revenues than web-form users with 95% confidence.</p>
+</div>
+<div id="chargeback-rate" class="section level4">
+<h4>Chargeback rate</h4>
+<p>Let’s compute the chargeback rates.<br />
+In order to do so we only keep the users with at least one rebill. The chargeback ratio wouldn’t make sense otherwise.</p>
+<pre class="r"><code># Only keep users with at list one rebill
+trxWithRebill &lt;- trxDenorm[trxDenorm$ct_rebill &gt; 0,]
+# There are 2497 users left
+dim(trxWithRebill)</code></pre>
+<pre><code>## [1] 2497    8</code></pre>
+<p>Compute mean and standard deviation.</p>
+<pre class="r"><code>CallAvgCB &lt;- mean(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 1])
+CallAvgCB 
+WebAvgCB &lt;- mean(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 0])
+WebAvgCB
+CallSdCB &lt;- sd(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 1])
+CallSdCB 
+WebSdCB &lt;- sd(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 0])
+WebSdCB </code></pre>
+<pre><code>## [1] 0.003213368
+## [1] 0.001062699
+## [1] 0.05661362
+## [1] 0.03259907</code></pre>
+<p><strong>Observation</strong>: Chargeback rate for call-in users seems higher than for the web form users.<br />
+Is this observation statistically significant?</p>
+<p>We apply the z-test:</p>
+<pre class="r"><code>res2 &lt;- z.test(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 1],trxWithRebill$chgbk_rate[trxWithRebill$test_group == 0],sigma.x = CallSdCB, sigma.y = WebSdCB,alternative = &quot;greater&quot;,conf.level = 0.95)
+res2</code></pre>
+<pre><code>## 
+##  Two-sample z-Test
+## 
+## data:  trxWithRebill$chgbk_rate[trxWithRebill$test_group == 1] and trxWithRebill$chgbk_rate[trxWithRebill$test_group == 0]
+## z = 1.2043, p-value = 0.1142
+## alternative hypothesis: true difference in means is greater than 0
+## 95 percent confidence interval:
+##  -0.0007867491            NA
+## sample estimates:
+##   mean of x   mean of y 
+## 0.003213368 0.001062699</code></pre>
+<p>We verify if the p-value is below the 5% bound.</p>
+<pre class="r"><code>#p-value
+res2$p.value
+res2$p.value &lt; 0.05</code></pre>
+<pre><code>## [1] 0.1142366
+## [1] FALSE</code></pre>
+<p>Since the p-value is too large, we can’t reject the null hypothesis. Therefore, the test is non-conclusive.</p>
+<p><strong>Conclusion</strong>: The data available is not sufficient to determine if a call-in user is more likely to generate a higher chargeback rate. The amount of chargeback being quite low (82 chargebacks only), we suggest to use a larger sample.</p>
 </div>
 </div>
 </div>

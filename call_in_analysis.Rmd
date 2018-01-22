@@ -28,6 +28,8 @@ library(dplyr)
 library(sqldf)
 #install.packages("BSDA")
 library(BSDA)         # for the z-test function
+#install.packages("BEST")
+
 ```
 
 We merge the two data sets together:
@@ -157,6 +159,7 @@ trxDenorm <- sqldf("select sample_id, test_group, count(*) ct_tt
         , round(sum(t.transaction_type == 'CHARGEBACK') / sum(t.transaction_type == 'REBILL'), 4) chgbk_rate
         from transFull t
         group by t.sample_id, test_group")
+head(trxDenorm)
 ```
 
 Let's investigate now the revenue average and standard deviation among the two groups.
@@ -195,20 +198,44 @@ z > 1.96
 
 #### Chargeback rate
 
-Let's compute the chargeback rates.
-```{r,results='hold'}
-CallCBrate <- sum(trxDenorm$ct_chgbk[trxDenorm$test_group == 1])/sum(trxDenorm$ct_rebill[trxDenorm$test_group == 1])
-CallCBrate 
-WebCBrate <- sum(trxDenorm$ct_chgbk[trxDenorm$test_group == 0])/sum(trxDenorm$ct_rebill[trxDenorm$test_group == 0])
-WebCBrate
+Let's compute the chargeback rates.  
+In order to do so we only keep the users with at least one rebill. The chargeback ratio wouldn't make sense otherwise.
+```{r}
+# Only keep users with at list one rebill
+trxWithRebill <- trxDenorm[trxDenorm$ct_rebill > 0,]
+# There are 2497 users left
+dim(trxWithRebill)
 ```
 
-**Observation**: Chargeback rate for call-in users seems lower than for the web form users.  
+Compute mean and standard deviation.
+```{r,results='hold'}
+CallAvgCB <- mean(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 1])
+CallAvgCB 
+WebAvgCB <- mean(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 0])
+WebAvgCB
+CallSdCB <- sd(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 1])
+CallSdCB 
+WebSdCB <- sd(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 0])
+WebSdCB 
+```
+
+**Observation**: Chargeback rate for call-in users seems higher than for the web form users.  
 Is this observation statistically significant?
 
 
 We apply the z-test:
 ```{r}
-res2 <- z.test(trxDenorm$revenues[trxDenorm$test_group == 1],trxDenorm$revenues[trxDenorm$test_group == 0],sigma.x = CallSdRev, sigma.y = WebSdRev,alternative = "greater",conf.level = 0.95)
+res2 <- z.test(trxWithRebill$chgbk_rate[trxWithRebill$test_group == 1],trxWithRebill$chgbk_rate[trxWithRebill$test_group == 0],sigma.x = CallSdCB, sigma.y = WebSdCB,alternative = "greater",conf.level = 0.95)
 res2
 ```
+
+We verify if the p-value is below the 5% bound.
+```{r,results='hold'}
+#p-value
+res2$p.value
+res2$p.value < 0.05
+```
+
+Since the p-value is too large, we can't reject the null hypothesis. Therefore, the test is non-conclusive.
+
+**Conclusion**: The data available is not sufficient to determine if a call-in user is more likely to generate a higher chargeback rate. The amount of chargeback being quite low (82 chargebacks only), we suggest to use a larger sample.
